@@ -1,0 +1,211 @@
+# OSS 渠道完整构建 workflow
+# 适用于 fork 仓库，不依赖任何私有 secrets
+# 产物：Windows .exe 安装包、Linux .deb/.AppImage、macOS .app（未签名）
+
+name: Build OSS
+
+on:
+  push:
+    branches:
+      - master
+      - main
+  pull_request:
+    branches:
+      - master
+      - main
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_BIN_NAME: oss
+  WARP_APP_NAME: WarpOss
+  RUSTFLAGS: -C debuginfo=line-tables-only --cfg=web_sys_unstable_apis
+  # OSS 渠道不含 Sentry，只用 release_bundle
+  FEATURES: release_bundle,gui,nld_improvements
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ─────────────────────────────────────────────
+  # Windows：编译 + Inno Setup 打 .exe 安装包
+  # ─────────────────────────────────────────────
+  build-windows:
+    name: Build (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up git long paths
+        shell: bash
+        run: git config --system core.longpaths true
+
+      - name: Set CARGO_HOME
+        shell: pwsh
+        run: echo "CARGO_HOME=C:\cargo" >> $env:GITHUB_ENV
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: windows
+
+      - name: Install build dependencies
+        shell: pwsh
+        run: ./script/windows/install_build_deps.ps1
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.9.0'
+
+      - name: Enable Corepack
+        shell: bash
+        run: corepack enable
+
+      - name: Install protoc
+        uses: ConorMacBride/install-package@v1
+        with:
+          choco: protoc
+
+      - name: Install Inno Setup
+        shell: pwsh
+        run: choco install innosetup -y
+
+      - name: Build warp-oss binary
+        shell: pwsh
+        run: |
+          $env:GIT_RELEASE_TAG = "v0.$(Get-Date -Format 'yyyy.MM.dd').oss_00"
+          ./script/windows/bundle.ps1 -CHANNEL oss -FEATURES "$env:FEATURES"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-oss-windows-installer
+          path: script/windows/Output/WarpOssSetup.exe
+          retention-days: 30
+
+  # ─────────────────────────────────────────────
+  # Linux：编译 + 打 .deb 和 .AppImage
+  # ─────────────────────────────────────────────
+  build-linux:
+    name: Build (Linux x86_64)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: linux
+
+      - name: Update apt cache
+        run: sudo apt-get update -y
+
+      - name: Install build dependencies
+        run: ./script/linux/install_build_deps
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.9.0'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install linuxdeploy (for AppImage)
+        run: ./script/linux/install_linuxdeploy
+
+      - name: Install fakeroot and dpkg-dev (for .deb)
+        run: sudo apt-get install -y fakeroot dpkg-dev
+
+      - name: Bundle (AppImage + .deb)
+        id: bundle
+        run: |
+          export GIT_RELEASE_TAG="v0.$(date +'%Y.%m.%d').oss_00"
+          ./script/linux/bundle --channel oss --packages appimage,deb
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Linux packages
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-oss-linux-packages
+          path: ${{ steps.bundle.outputs.packages_dir }}/*
+          retention-days: 30
+
+  # ─────────────────────────────────────────────
+  # macOS：编译 + cargo-bundle 打 .app（未签名）
+  # ─────────────────────────────────────────────
+  build-macos:
+    name: Build (macOS)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: macos
+
+      - name: Install build dependencies
+        run: ./script/install_cargo_build_deps
+
+      - name: Install cargo-bundle
+        run: ./script/install_cargo_bundle
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.9.0'
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Install protoc
+        uses: ConorMacBride/install-package@v1
+        with:
+          brew: protobuf
+
+      - name: Bundle macOS app
+        id: bundle
+        run: |
+          export GIT_RELEASE_TAG="v0.$(date +'%Y.%m.%d').oss_00"
+          # --nouniversal 只构建当前架构，跳过 arm64+x86_64 合并步骤
+          ./script/bundle --channel oss --nouniversal
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 没有签名证书，跳过签名步骤
+          SKIP_CODESIGN: "1"
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-oss-macos-dmg
+          # 注意：未签名，用户运行时需要在"系统设置 > 隐私与安全性"中手动允许
+          path: "**/*.dmg"
+          retention-days: 30
