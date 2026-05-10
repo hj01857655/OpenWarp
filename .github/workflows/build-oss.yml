@@ -86,7 +86,7 @@ jobs:
 
       - name: Install cargo-about (生成第三方许可证)
         shell: bash
-        run: cargo binstall cargo-about --no-confirm
+        run: cargo install --locked cargo-about@0.8.4
 
       - name: Build warp-oss binary
         shell: pwsh
@@ -133,7 +133,7 @@ jobs:
         uses: cargo-bins/cargo-binstall@main
 
       - name: Install cargo-about (生成第三方许可证)
-        run: cargo binstall cargo-about --no-confirm
+        run: cargo install --locked cargo-about@0.8.4
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -190,7 +190,7 @@ jobs:
 
       - name: Install cargo-about and cargo-bundle
         run: |
-          cargo binstall cargo-about --no-confirm
+          cargo install --locked cargo-about@0.8.4
           cargo binstall cargo-bundle --no-confirm
 
       - name: Install create-dmg
