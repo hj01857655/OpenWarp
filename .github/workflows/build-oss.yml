@@ -122,6 +122,9 @@ jobs:
       - name: Install build dependencies
         run: ./script/linux/install_build_deps
 
+      - name: Install cargo-about (生成第三方许可证)
+        run: cargo install cargo-about --locked
+
       - name: Install Node.js
         uses: actions/setup-node@v4
         with:
@@ -169,11 +172,16 @@ jobs:
         with:
           key: macos
 
-      - name: Install build dependencies
-        run: ./script/install_cargo_build_deps
+      - name: Install protoc
+        run: brew install protobuf
 
-      - name: Install cargo-bundle
-        run: ./script/install_cargo_bundle
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-about and cargo-bundle
+        run: |
+          cargo binstall cargo-about --no-confirm
+          cargo binstall cargo-bundle --no-confirm
 
       - name: Install create-dmg
         run: brew install create-dmg
@@ -186,26 +194,18 @@ jobs:
       - name: Enable Corepack
         run: corepack enable
 
-      - name: Install protoc
-        uses: ConorMacBride/install-package@v1
-        with:
-          brew: protobuf
-
       - name: Bundle macOS app
         id: bundle
         run: |
           export GIT_RELEASE_TAG="v0.$(date +'%Y.%m.%d').oss_00"
-          # --nouniversal 只构建当前架构，跳过 arm64+x86_64 合并步骤
-          ./script/bundle --channel oss --nouniversal
+          ./script/bundle --channel oss --nouniversal --skip-codesign
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # 没有签名证书，跳过签名步骤
           SKIP_CODESIGN: "1"
 
       - name: Upload macOS DMG
         uses: actions/upload-artifact@v4
         with:
           name: warp-oss-macos-dmg
-          # 注意：未签名，用户运行时需要在"系统设置 > 隐私与安全性"中手动允许
           path: "**/*.dmg"
           retention-days: 30
