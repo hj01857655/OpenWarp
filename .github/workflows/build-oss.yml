@@ -28,6 +28,9 @@ env:
   # OSS 渠道不含 Sentry，只用 release_bundle
   FEATURES: release_bundle,gui,nld_improvements
 
+permissions:
+  contents: write
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -219,3 +222,44 @@ jobs:
           name: warp-oss-macos-dmg
           path: "**/*.dmg"
           retention-days: 30
+
+  # ─────────────────────────────────────────────
+  # Release：汇总三个平台安装包并发布到 GitHub Release
+  # ─────────────────────────────────────────────
+  publish-release:
+    name: Publish OSS Release
+    runs-on: ubuntu-latest
+    needs:
+      - build-windows
+      - build-linux
+      - build-macos
+    if: ${{ github.event_name != 'pull_request' }}
+    permissions:
+      contents: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create release metadata
+        id: release
+        run: |
+          release_date="$(date +'%Y.%m.%d')"
+          echo "tag=v0.${release_date}.oss.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+          echo "name=Warp OSS v0.${release_date}.oss.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: List release assets
+        run: find dist -type f -maxdepth 2 -print
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release.outputs.tag }}
+          name: ${{ steps.release.outputs.name }}
+          draft: false
+          prerelease: true
+          files: dist/*
+          fail_on_unmatched_files: true
+          token: ${{ secrets.GITHUB_TOKEN }}
