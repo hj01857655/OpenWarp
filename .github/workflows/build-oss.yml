@@ -81,6 +81,13 @@ jobs:
         shell: pwsh
         run: choco install innosetup -y
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install cargo-about (生成第三方许可证)
+        shell: bash
+        run: cargo binstall cargo-about --no-confirm
+
       - name: Build warp-oss binary
         shell: pwsh
         run: |
@@ -122,8 +129,11 @@ jobs:
       - name: Install build dependencies
         run: ./script/linux/install_build_deps
 
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
       - name: Install cargo-about (生成第三方许可证)
-        run: cargo install cargo-about --locked
+        run: cargo binstall cargo-about --no-confirm
 
       - name: Install Node.js
         uses: actions/setup-node@v4
@@ -160,7 +170,7 @@ jobs:
   build-macos:
     name: Build (macOS)
     runs-on: macos-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - uses: actions/checkout@v4
 
